@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>버블 아레나</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; background:radial-gradient(circle at 50% 10%,#194f7b,#071426 65%); font-family:system-ui,sans-serif; color:#effaff; }
+    .shell { width:min(94vw,820px); text-align:center; }
+    h1 { font-size:clamp(1.5rem,4vw,2.4rem); letter-spacing:.08em; margin:.4rem 0; text-shadow:0 3px #09243b; }
+    p { margin:.25rem 0 .8rem; color:#bfe5ff; }
+    canvas { width:100%; aspect-ratio:19/13; display:block; border:5px solid #7ad8ff; border-radius:14px; box-shadow:0 0 0 5px #10385b,0 20px 40px #0008; background:#70c6e7; image-rendering:pixelated; }
+    kbd { background:#16344b; border:1px solid #6dbce4; border-bottom-width:3px; border-radius:4px; padding:.08rem .35rem; font-family:inherit; }
+    .status { min-height:1.5em; font-weight:700; color:#ffec9b; margin-top:.75rem; }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <h1>🫧 버블 아레나</h1>
+    <p><kbd>W A S D</kbd> 또는 <kbd>방향키</kbd> 이동 · <kbd>Space</kbd> 버블 설치 · <kbd>R</kbd> 다시 시작</p>
+    <canvas id="game" width="950" height="650" aria-label="버블 아레나 게임"></canvas>
+    <div id="status" class="status">적을 물줄기로 잡아보세요!</div>
+  </main>
+<script>
+(() => {
+  const c=document.querySelector('#game'), ctx=c.getContext('2d'), status=document.querySelector('#status');
+  const W=19,H=13,S=50, keys=new Set(); let board,player,bots,bubbles,flames,ended,last=0;
+  const dirs={ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0],w:[0,-1],s:[0,1],a:[-1,0],d:[1,0]};
+  addEventListener('keydown',e=>{ const k=e.key.length===1?e.key.toLowerCase():e.key; if([' ','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key))e.preventDefault(); keys.add(k); if(k===' ')place(player); if(k==='r')init(); });
+  addEventListener('keyup',e=>keys.delete(e.key.length===1?e.key.toLowerCase():e.key));
+  const inside=(x,y)=>x>=0&&y>=0&&x<W&&y<H;
+  function init(){
+    board=Array.from({length:H},(_,y)=>Array.from({length:W},(_,x)=> (x%2===1&&y%2===1)?'wall':'empty'));
+    const spawn={x:5,y:5};
+    for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++) if(board[y][x]==='empty'&&(Math.abs(x-spawn.x)>4||Math.abs(y-spawn.y)>4)&&(x*5+y*3)%4===0) board[y][x]='crate';
+    player={x:spawn.x,y:spawn.y,drawX:spawn.x,drawY:spawn.y,walk:0,alive:true,move:0,cap:1,range:2,color:'#ffcf52'};
+    bots=[]; bubbles=[];flames=[];ended=false;status.textContent='상자를 모두 부숴보세요!';
+  }
+  function blocked(x,y,actor){ const cellX=Math.round(x),cellY=Math.round(y); return !inside(cellX,cellY)||cellX===0||cellY===0||cellX===W-1||cellY===H-1||board[cellY][cellX]!=='empty'||bubbles.some(b=>b.x===cellX&&b.y===cellY&&b.owner!==actor); }
+  function move(a,dx,dy){const x=a.x+dx,y=a.y+dy;if(!blocked(x,y,a)){a.x=x;a.y=y;a.walk=.14;}}
+  function place(a){const x=Math.round(a.x),y=Math.round(a.y);if(!a?.alive||ended||bubbles.filter(b=>b.owner===a).length>=a.cap||bubbles.some(b=>b.x===x&&b.y===y))return; bubbles.push({x,y,owner:a,t:2.05,range:a.range});}
+  function blast(b){
+    const add=(x,y)=>{flames.push({x,y,t:.58}); for(const q of bubbles.filter(q=>q.x===x&&q.y===y))q.t=0;}; add(b.x,b.y);
+    for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]])for(let i=1;i<=b.range;i++){let x=b.x+dx*i,y=b.y+dy*i;if(!inside(x,y)||board[y][x]==='wall')break; add(x,y); if(board[y][x]==='crate'){board[y][x]='empty';break;}}
+  }
+  function danger(x,y){return flames.some(f=>f.x===x&&f.y===y)||bubbles.some(b=>{if(b.x===x&&b.y===y)return true; if(b.x===x&&Math.abs(b.y-y)<=b.range)return clearLine(b.x,b.y,x,y); if(b.y===y&&Math.abs(b.x-x)<=b.range)return clearLine(b.x,b.y,x,y); return false;});}
+  function clearLine(x,y,tx,ty){let dx=Math.sign(tx-x),dy=Math.sign(ty-y);for(x+=dx,y+=dy;x!==tx||y!==ty;x+=dx,y+=dy)if(board[y][x]!=='empty')return false;return true;}
+  function botAI(a,dt){if(!a.alive)return;a.think-=dt;if(a.think>0)return;a.think=.23;const options=[[0,-1],[0,1],[-1,0],[1,0]].filter(d=>!blocked(a.x+d[0],a.y+d[1],a)); const safe=options.filter(d=>!danger(a.x+d[0],a.y+d[1])); const choices=safe.length?safe:options; if(choices.length) {const d=choices[Math.floor(Math.random()*choices.length)];move(a,...d);} const near=Math.abs(a.x-player.x)+Math.abs(a.y-player.y)<4; if((near||Math.random()<.12)&&!danger(a.x,a.y))place(a);}
+  function update(dt){if(ended)return;player.move-=dt;if(player.alive&&player.move<=0){for(const k of keys)if(dirs[k]){const [dx,dy]=dirs[k];move(player,dx*.5,dy*.5);player.move=.1;break;}}
+    const glide=Math.min(1,dt*16); player.drawX+=(player.x-player.drawX)*glide; player.drawY+=(player.y-player.drawY)*glide; player.walk=Math.max(0,player.walk-dt);
+    bots.forEach(b=>botAI(b,dt)); bubbles.forEach(b=>b.t-=dt); for(const b of bubbles.filter(b=>b.t<=0))blast(b); bubbles=bubbles.filter(b=>b.t>0); flames.forEach(f=>f.t-=dt);flames=flames.filter(f=>f.t>0);
+    for(const a of [player,...bots])if(a.alive&&flames.some(f=>Math.abs(f.x-a.x)<.51&&Math.abs(f.y-a.y)<.51)){a.alive=false;}
+    if(!player.alive){ended=true;status.textContent='버블에 갇혔어요! R 키로 다시 도전';}else if(!board.flat().includes('crate')){ended=true;status.textContent='승리! 상자를 모두 부쉈어요. R 키로 다시 하기';}
+  }
+  function rect(x,y,col){ctx.fillStyle=col;ctx.fillRect(x*S,y*S,S,S)}
+  function draw(){ctx.clearRect(0,0,c.width,c.height); for(let y=0;y<H;y++)for(let x=0;x<W;x++){rect(x,y,(x+y)%2?'#63bddc':'#70c8e7');if(x===0||y===0||x===W-1||y===H-1||board[y][x]==='wall'){rect(x,y,'#174e71');ctx.fillStyle='#286b8d';ctx.fillRect(x*S+5,y*S+5,S-10,S-10);}else if(board[y][x]==='crate'){rect(x,y,'#bb7a38');ctx.fillStyle='#e5a655';ctx.fillRect(x*S+6,y*S+6,S-12,S-12);}}
+    for(const f of flames){const progress=1-f.t/.58, x=f.x*S+25,y=f.y*S+25, radius=7+progress*19, alpha=Math.max(0,1-progress*.7);ctx.fillStyle=`rgba(218,250,255,${alpha})`;ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);ctx.fill();ctx.fillStyle=`rgba(66,179,255,${alpha})`;ctx.beginPath();ctx.arc(x,y,Math.max(4,radius-8),0,Math.PI*2);ctx.fill();ctx.strokeStyle=`rgba(255,255,255,${Math.max(0,1-progress)*.9})`;ctx.lineWidth=3;ctx.beginPath();ctx.arc(x,y,radius+3,0,Math.PI*2);ctx.stroke();for(let i=0;i<4;i++){const angle=i*Math.PI/2+progress*2,drop=13+progress*14;ctx.fillStyle=`rgba(220,250,255,${Math.max(0,1-progress)})`;ctx.beginPath();ctx.arc(x+Math.cos(angle)*drop,y+Math.sin(angle)*drop,3,0,Math.PI*2);ctx.fill();}}
+    for(const b of bubbles){const urgency=1+(2.05-b.t)*3, pulse=Math.sin(performance.now()/120*urgency), radius=17+pulse*1.8, x=b.x*S+25+pulse*.8,y=b.y*S+26;ctx.fillStyle='#167fca';ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);ctx.fill();ctx.fillStyle='#49b7ef';ctx.beginPath();ctx.arc(x,y,radius-5,0,Math.PI*2);ctx.fill();ctx.fillStyle='#d8faff';ctx.beginPath();ctx.arc(x-6,y-7,5+pulse*.5,0,Math.PI*2);ctx.fill();}
+    for(const a of [player,...bots])if(a.alive){const x=(a.drawX??a.x)*S+25,y=(a.drawY??a.y)*S+25+(a.walk>0?Math.sin(performance.now()/38)*2:0);ctx.fillStyle=a.color;ctx.beginPath();ctx.arc(x,y,17,0,Math.PI*2);ctx.fill();ctx.fillStyle='#17253a';ctx.fillRect(x-9,y-5,5,6);ctx.fillRect(x+4,y-5,5,6);ctx.fillStyle='#fff';ctx.fillRect(x-8,y-5,2,2);ctx.fillRect(x+5,y-5,2,2);}
+  }
+  function loop(t){let dt=Math.min(.05,(t-last)/1000||0);last=t;update(dt);draw();requestAnimationFrame(loop)} init();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
